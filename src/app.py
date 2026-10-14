@@ -14,7 +14,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("📊 Planilha Express")
+st.title("Planilha Express")
 st.subheader("Organize seus dados sem complicação")
 
 st.write(
@@ -24,13 +24,35 @@ st.write(
 
 
 # --------------------------------------------------
-# FUNÇÕES
+# LIMITES E FUNÇÕES DE PROCESSAMENTO
 # --------------------------------------------------
-
 
 MAX_CSV_SIZE_BYTES = 10 * 1024 * 1024
 MAX_CSV_ROWS = 100_000
 MAX_CSV_COLUMNS = 100
+
+
+def limpar_resultado():
+    """Remove o resultado mantido no estado da sessão."""
+    st.session_state.pop("resultado_tratamento", None)
+
+
+def reiniciar_aplicacao():
+    """
+    Limpa o resultado e os controles relacionados aos arquivos.
+    O Streamlit executará novamente o script após a interação.
+    """
+    for chave in (
+        "resultado_tratamento",
+        "arquivo_a",
+        "arquivo_b",
+        "criterio_duplicidade",
+        "coluna_identificadora",
+        "mostrar_previa",
+    ):
+        st.session_state.pop(chave, None)
+
+    st.rerun()
 
 
 def ler_csv(arquivo):
@@ -42,9 +64,7 @@ def ler_csv(arquivo):
         raise ValueError("O arquivo enviado está vazio.")
 
     if len(conteudo) > MAX_CSV_SIZE_BYTES:
-        raise ValueError(
-            "O arquivo ultrapassa o limite de 10 MB."
-        )
+        raise ValueError("O arquivo ultrapassa o limite de 10 MB.")
 
     if b"\x00" in conteudo:
         raise ValueError(
@@ -63,19 +83,14 @@ def ler_csv(arquivo):
                 dtype=str,
                 keep_default_na=False,
                 on_bad_lines="error",
+                nrows=MAX_CSV_ROWS + 1,
             )
 
             if len(df.columns) > MAX_CSV_COLUMNS:
-                raise ValueError(
-                    f"O arquivo excede o limite de "
-                    f"{MAX_CSV_COLUMNS} colunas."
-                )
+                raise ValueError("O arquivo excede o limite de colunas.")
 
             if len(df) > MAX_CSV_ROWS:
-                raise ValueError(
-                    f"O arquivo excede o limite de "
-                    f"{MAX_CSV_ROWS:,} registros."
-                )
+                raise ValueError("O arquivo excede o limite de registros.")
 
             return df
 
@@ -83,25 +98,18 @@ def ler_csv(arquivo):
             ultimo_erro = erro
 
         except pd.errors.ParserError as erro:
-            raise ValueError(
-                "O CSV possui uma estrutura inválida."
-            ) from erro
+            raise ValueError("A estrutura do CSV é inválida.") from erro
 
         except pd.errors.EmptyDataError as erro:
-            raise ValueError(
-                "O arquivo não contém um CSV válido."
-            ) from erro
+            raise ValueError("O arquivo não contém um CSV válido.") from erro
 
     raise ValueError(
-        f"Não foi possível interpretar o arquivo: {ultimo_erro}"
-    )
+        "Não foi possível interpretar o arquivo com os formatos aceitos."
+    ) from ultimo_erro
 
 
-
-
-#FINAL
 def normalizar_para_comparacao(df):
-    """Cria uma cópia normalizada sem alterar os dados exportados."""
+    """Cria uma cópia normalizada sem alterar os dados originais."""
     comparacao = df.copy()
 
     for coluna in comparacao.columns:
@@ -116,17 +124,15 @@ def normalizar_para_comparacao(df):
 
 
 def tratar_planilhas(df_a, df_b, coluna_identificadora=None):
-    """Combina as planilhas e remove duplicados."""
+    """Combina planilhas e remove registros duplicados."""
+
     if list(df_a.columns) != list(df_b.columns):
         raise ValueError(
             "As planilhas precisam ter as mesmas colunas, "
             "na mesma ordem."
         )
 
-    combinado = pd.concat(
-        [df_a, df_b],
-        ignore_index=True,
-    )
+    combinado = pd.concat([df_a, df_b], ignore_index=True)
 
     total_original = len(combinado)
     comparacao = normalizar_para_comparacao(combinado)
@@ -135,7 +141,7 @@ def tratar_planilhas(df_a, df_b, coluna_identificadora=None):
         mascara_unicos = ~comparacao.duplicated()
     else:
         if coluna_identificadora not in comparacao.columns:
-            raise ValueError("A coluna identificadora selecionada não existe.")
+            raise ValueError("A coluna identificadora não existe.")
 
         mascara_unicos = ~comparacao.duplicated(
             subset=[coluna_identificadora]
@@ -147,29 +153,24 @@ def tratar_planilhas(df_a, df_b, coluna_identificadora=None):
 
 
 def proteger_valor_csv(valor):
-    """Reduz o risco de valores serem interpretados como fórmulas."""
+    """Reduz o risco de interpretação de valores como fórmulas CSV."""
     texto = str(valor)
-
-    # Considera também espaços antes do primeiro caractere.
     inicio = texto.lstrip(" \t\r\n")
 
-    if inicio.startswith(("=", "+", "-", "@", "\t", "\r")):
+    if inicio.startswith(("=", "+", "-", "@")):
         return "'" + texto
 
     return texto
 
 
 def gerar_csv(df):
-    """Exporta CSV aplicando proteção contra fórmulas perigosas."""
+    """Gera um CSV protegido contra fórmulas perigosas."""
     exportacao = df.copy()
 
     for coluna in exportacao.columns:
-        exportacao[coluna] = exportacao[coluna].map(
-            proteger_valor_csv
-        )
+        exportacao[coluna] = exportacao[coluna].map(proteger_valor_csv)
 
     return exportacao.to_csv(index=False).encode("utf-8-sig")
-
 
 
 # --------------------------------------------------
@@ -196,19 +197,18 @@ with coluna2:
 
 
 # --------------------------------------------------
-# LEITURA E PRÉ-VISUALIZAÇÃO
+# LEITURA E CONFERÊNCIA
 # --------------------------------------------------
 
 if arquivo_a is None or arquivo_b is None:
     st.info("Envie as duas planilhas CSV para começar.")
-    st.session_state.pop("resultado_tratamento", None)
+    limpar_resultado()
 
 else:
     try:
         df_a = ler_csv(arquivo_a)
         df_b = ler_csv(arquivo_b)
 
-        # Limpa espaços nos nomes das colunas.
         df_a.columns = df_a.columns.str.strip()
         df_b.columns = df_b.columns.str.strip()
 
@@ -216,30 +216,43 @@ else:
             raise ValueError("Um dos arquivos não possui colunas válidas.")
 
         if not df_a.columns.is_unique or not df_b.columns.is_unique:
-            raise ValueError(
-                "Existem nomes de colunas repetidos em um dos arquivos."
-            )
+            raise ValueError("Existem nomes de colunas repetidos.")
 
         st.subheader("Conferência das planilhas")
 
-        col_a, col_b = st.columns(2)
+        st.caption(
+            f"Primeira planilha: {len(df_a)} registros. "
+            f"Segunda planilha: {len(df_b)} registros."
+        )
 
-        with col_a:
-            st.write("**Primeira planilha**")
-            st.caption(f"{len(df_a)} registros")
-            st.dataframe(df_a.head(5), use_container_width=True)
+        mostrar_previa = st.checkbox(
+            "Exibir os primeiros cinco registros de cada arquivo",
+            value=False,
+            key="mostrar_previa",
+            help=(
+                "Ative somente se precisar conferir os registros. "
+                "A pré-visualização pode expor dados pessoais."
+            ),
+        )
 
-        with col_b:
-            st.write("**Segunda planilha**")
-            st.caption(f"{len(df_b)} registros")
-            st.dataframe(df_b.head(5), use_container_width=True)
+        if mostrar_previa:
+            col_a, col_b = st.columns(2)
+
+            with col_a:
+                st.write("Primeira planilha")
+                st.dataframe(df_a.head(5), use_container_width=True)
+
+            with col_b:
+                st.write("Segunda planilha")
+                st.dataframe(df_b.head(5), use_container_width=True)
 
         if list(df_a.columns) != list(df_b.columns):
+            limpar_resultado()
+
             st.error(
                 "As colunas não correspondem. "
-                "Verifique os nomes e a ordem das colunas nos dois CSVs."
+                "Confira os nomes e a ordem nos dois arquivos."
             )
-            st.session_state.pop("resultado_tratamento", None)
 
         else:
             st.divider()
@@ -264,8 +277,6 @@ else:
                     key="coluna_identificadora",
                 )
 
-            # O formulário agrupa as opções e evita processamentos
-            # inesperados enquanto o usuário altera a configuração.
             with st.form("form_tratamento"):
                 confirmar = st.form_submit_button(
                     "Combinar e tratar planilhas",
@@ -287,20 +298,38 @@ else:
                         "removidos": removidos,
                     }
 
-                except Exception as erro:
-                    st.error(f"Falha durante o tratamento: {erro}")
-                    st.session_state.pop("resultado_tratamento", None)
+                except ValueError:
+                    limpar_resultado()
 
-    except (ValueError, pd.errors.EmptyDataError) as erro:
-        st.error(f"Não foi possível processar os arquivos: {erro}")
-        st.session_state.pop("resultado_tratamento", None)
+                    st.error(
+                        "Não foi possível tratar os arquivos. "
+                        "Confira a estrutura e os critérios selecionados."
+                    )
 
-    except Exception as erro:
+                except Exception:
+                    limpar_resultado()
+
+                    st.error(
+                        "Não foi possível concluir o tratamento. "
+                        "Tente novamente."
+                    )
+
+    except ValueError:
+        limpar_resultado()
+
         st.error(
-            "Ocorreu um erro inesperado ao ler os arquivos. "
-            f"Detalhes: {type(erro).__name__}: {erro}"
+            "Não foi possível ler os arquivos. "
+            "Verifique se os CSVs estão válidos e dentro dos limites aceitos."
         )
-        st.session_state.pop("resultado_tratamento", None)
+
+    except Exception:
+        limpar_resultado()
+
+        st.error(
+            "Ocorreu um erro inesperado ao processar os arquivos. "
+            "Tente novamente. Se o problema persistir, "
+            "entre em contato com o responsável pela aplicação."
+        )
 
 
 # --------------------------------------------------
@@ -313,7 +342,7 @@ if dados is not None:
     resultado = dados["df"]
 
     st.divider()
-    st.subheader("✅ Tratamento concluído")
+    st.subheader("Tratamento concluído")
 
     metrica1, metrica2, metrica3 = st.columns(3)
 
@@ -325,9 +354,18 @@ if dados is not None:
     st.dataframe(resultado, use_container_width=True)
 
     st.download_button(
-        label="📥 Baixar CSV tratado",
+        label="Baixar CSV tratado",
         data=gerar_csv(resultado),
         file_name="planilha_tratada.csv",
         mime="text/csv",
         key="download_csv",
+    )
+
+    st.button(
+        "Limpar dados e reiniciar",
+        on_click=reiniciar_aplicacao,
+        help=(
+            "Remove o resultado da sessão e limpa os controles "
+            "de upload para iniciar um novo processamento."
+        ),
     )
