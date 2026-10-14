@@ -350,8 +350,17 @@ if dados is not None:
     metrica2.metric("Duplicados removidos", dados["removidos"])
     metrica3.metric("Registros finais", len(resultado))
 
-    st.subheader("Resultado final")
-    st.dataframe(resultado, use_container_width=True)
+    
+    mostrar_resultado = st.checkbox(
+        "Visualizar os dados tratados",
+        value=False,
+        help="Exiba a planilha somente quando precisar conferir os registros.",
+    )
+
+    if mostrar_resultado:
+        st.subheader("Resultado final")
+        st.dataframe(resultado, use_container_width=True)
+
 
     st.download_button(
         label="Baixar CSV tratado",

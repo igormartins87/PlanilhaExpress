@@ -1,5 +1,28 @@
+```gitignore
+# Ambiente Python
 .venv/
 __pycache__/
 .pytest_cache/
 *.py[cod]
+
+# Variáveis de ambiente e segredos
 .env
+.env.*
+!.env.example
+
+
+# Arquivos de dados
+*.csv
+!src/dados_exemplo/
+!src/dados_exemplo/*.csv
+*.xlsx
+*.xls
+
+
+# Arquivos temporários
+*.tmp
+*.log
+
+# Configurações locais do Streamlit
+.streamlit/secrets.toml
+```
