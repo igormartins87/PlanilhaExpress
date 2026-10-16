@@ -38,10 +38,7 @@ def limpar_resultado():
 
 
 def reiniciar_aplicacao():
-    """
-    Limpa o resultado e os controles relacionados aos arquivos.
-    O Streamlit executará novamente o script após a interação.
-    """
+    """Limpa o resultado e os controles relacionados aos arquivos."""
     for chave in (
         "resultado_tratamento",
         "arquivo_a",
@@ -49,6 +46,8 @@ def reiniciar_aplicacao():
         "criterio_duplicidade",
         "coluna_identificadora",
         "mostrar_previa",
+        "todas_colunas_saida",
+        "colunas_saida",
     ):
         st.session_state.pop(chave, None)
 
@@ -87,10 +86,14 @@ def ler_csv(arquivo):
             )
 
             if len(df.columns) > MAX_CSV_COLUMNS:
-                raise ValueError("O arquivo excede o limite de colunas.")
+                raise ValueError(
+                    "O arquivo excede o limite de colunas."
+                )
 
             if len(df) > MAX_CSV_ROWS:
-                raise ValueError("O arquivo excede o limite de registros.")
+                raise ValueError(
+                    "O arquivo excede o limite de registros."
+                )
 
             return df
 
@@ -98,10 +101,14 @@ def ler_csv(arquivo):
             ultimo_erro = erro
 
         except pd.errors.ParserError as erro:
-            raise ValueError("A estrutura do CSV é inválida.") from erro
+            raise ValueError(
+                "A estrutura do CSV é inválida."
+            ) from erro
 
         except pd.errors.EmptyDataError as erro:
-            raise ValueError("O arquivo não contém um CSV válido.") from erro
+            raise ValueError(
+                "O arquivo não contém um CSV válido."
+            ) from erro
 
     raise ValueError(
         "Não foi possível interpretar o arquivo com os formatos aceitos."
@@ -168,7 +175,9 @@ def gerar_csv(df):
     exportacao = df.copy()
 
     for coluna in exportacao.columns:
-        exportacao[coluna] = exportacao[coluna].map(proteger_valor_csv)
+        exportacao[coluna] = exportacao[coluna].map(
+            proteger_valor_csv
+        )
 
     return exportacao.to_csv(index=False).encode("utf-8-sig")
 
@@ -213,7 +222,9 @@ else:
         df_b.columns = df_b.columns.str.strip()
 
         if len(df_a.columns) == 0 or len(df_b.columns) == 0:
-            raise ValueError("Um dos arquivos não possui colunas válidas.")
+            raise ValueError(
+                "Um dos arquivos não possui colunas válidas."
+            )
 
         if not df_a.columns.is_unique or not df_b.columns.is_unique:
             raise ValueError("Existem nomes de colunas repetidos.")
@@ -240,11 +251,17 @@ else:
 
             with col_a:
                 st.write("Primeira planilha")
-                st.dataframe(df_a.head(5), use_container_width=True)
+                st.dataframe(
+                    df_a.head(5),
+                    use_container_width=True,
+                )
 
             with col_b:
                 st.write("Segunda planilha")
-                st.dataframe(df_b.head(5), use_container_width=True)
+                st.dataframe(
+                    df_b.head(5),
+                    use_container_width=True,
+                )
 
         if list(df_a.columns) != list(df_b.columns):
             limpar_resultado()
@@ -257,6 +274,10 @@ else:
         else:
             st.divider()
             st.subheader("Configurar tratamento")
+
+            # ------------------------------------------
+            # CRITÉRIO DE DUPLICIDADE
+            # ------------------------------------------
 
             criterio = st.radio(
                 "Como deseja identificar registros duplicados?",
@@ -275,7 +296,46 @@ else:
                     "Selecione a coluna identificadora",
                     options=list(df_a.columns),
                     key="coluna_identificadora",
+                    help=(
+                        "Registros com o mesmo valor nessa coluna "
+                        "serão considerados duplicados."
+                    ),
                 )
+
+            # ------------------------------------------
+            # SELEÇÃO DAS COLUNAS DE SAÍDA
+            # ------------------------------------------
+
+            st.subheader("Colunas do resultado")
+
+            todas_colunas_saida = st.checkbox(
+                "Incluir todas as colunas no resultado",
+                value=True,
+                key="todas_colunas_saida",
+                help=(
+                    "Marcado: mantém todas as colunas. "
+                    "Desmarcado: permite escolher quais colunas "
+                    "serão exibidas e incluídas no CSV."
+                ),
+            )
+
+            if todas_colunas_saida:
+                colunas_saida = list(df_a.columns)
+            else:
+                colunas_saida = st.multiselect(
+                    "Selecione as colunas para o arquivo final",
+                    options=list(df_a.columns),
+                    default=[],
+                    key="colunas_saida",
+                    help=(
+                        "Escolha uma ou mais colunas para a "
+                        "visualização e o download."
+                    ),
+                )
+
+            # ------------------------------------------
+            # CONFIRMAÇÃO DO TRATAMENTO
+            # ------------------------------------------
 
             with st.form("form_tratamento"):
                 confirmar = st.form_submit_button(
@@ -285,34 +345,59 @@ else:
                 )
 
             if confirmar:
-                try:
-                    resultado, total, removidos = tratar_planilhas(
-                        df_a,
-                        df_b,
-                        coluna_identificadora=coluna_identificadora,
-                    )
-
-                    st.session_state["resultado_tratamento"] = {
-                        "df": resultado,
-                        "total": total,
-                        "removidos": removidos,
-                    }
-
-                except ValueError:
+                if not todas_colunas_saida and not colunas_saida:
                     limpar_resultado()
 
                     st.error(
-                        "Não foi possível tratar os arquivos. "
-                        "Confira a estrutura e os critérios selecionados."
+                        "Selecione pelo menos uma coluna para o resultado."
                     )
 
-                except Exception:
-                    limpar_resultado()
+                else:
+                    try:
+                        # Primeiro, combina e remove duplicados
+                        # utilizando o critério escolhido.
+                        resultado_completo, total, removidos = (
+                            tratar_planilhas(
+                                df_a,
+                                df_b,
+                                coluna_identificadora=(
+                                    coluna_identificadora
+                                ),
+                            )
+                        )
 
-                    st.error(
-                        "Não foi possível concluir o tratamento. "
-                        "Tente novamente."
-                    )
+                        # Depois, seleciona as colunas de saída.
+                        # Essa etapa não altera a identificação
+                        # dos duplicados nem a contagem de registros.
+                        if todas_colunas_saida:
+                            resultado = resultado_completo
+                        else:
+                            resultado = resultado_completo.loc[
+                                :,
+                                colunas_saida,
+                            ].copy()
+
+                        st.session_state["resultado_tratamento"] = {
+                            "df": resultado,
+                            "total": total,
+                            "removidos": removidos,
+                        }
+
+                    except ValueError:
+                        limpar_resultado()
+
+                        st.error(
+                            "Não foi possível tratar os arquivos. "
+                            "Confira a estrutura e os critérios selecionados."
+                        )
+
+                    except Exception:
+                        limpar_resultado()
+
+                        st.error(
+                            "Não foi possível concluir o tratamento. "
+                            "Tente novamente."
+                        )
 
     except ValueError:
         limpar_resultado()
@@ -350,7 +435,6 @@ if dados is not None:
     metrica2.metric("Duplicados removidos", dados["removidos"])
     metrica3.metric("Registros finais", len(resultado))
 
-    
     mostrar_resultado = st.checkbox(
         "Visualizar os dados tratados",
         value=False,
@@ -359,8 +443,10 @@ if dados is not None:
 
     if mostrar_resultado:
         st.subheader("Resultado final")
-        st.dataframe(resultado, use_container_width=True)
-
+        st.dataframe(
+            resultado,
+            use_container_width=True,
+        )
 
     st.download_button(
         label="Baixar CSV tratado",
